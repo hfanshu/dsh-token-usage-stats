@@ -1,0 +1,11 @@
+# dsh-token-usage-stats bundle patch.
+# Row id `token-usage-stats`; every value below can be overridden by a
+# higher-priority user layer in cordis.patch.yml without touching this file.
+- insert:
+    - id: token-usage-stats
+      name: 'dsh-token-usage-stats'
+      config:
+        # Day records kept before older ones are pruned (local calendar days).
+        retentionDays: 400
+        # How many recent days the expanded detail list and /tokenstats show.
+        detailDays: 14

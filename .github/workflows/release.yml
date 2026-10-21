@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify the package manifest
+        run: |
+          node -e "const p=require('./package.json'); if(!p.dsh||!p.dsh.bundle||!p.dsh.client){throw new Error('missing dsh bundle/client manifest')}; console.log('manifest ok', p.name+'@'+p.version)"
+
+      - name: Syntax-check the plugin entry points
+        run: |
+          node --check index.js
+          node --check client.js
+
+      - name: Pack the bundle
+        run: |
+          npm pack
+          mv ./*.tgz ./dsh-token-usage-stats.tgz
+
+      - name: Build the directory zip
+        run: |
+          mkdir -p staging/dsh-token-usage-stats
+          cp -r index.js client.js client.v*.js cordis.patch.yml icon.svg \
+                package.json README.md INSTALL.md LICENSE locale \
+                staging/dsh-token-usage-stats/
+          cd staging && zip -r ../dsh-token-usage-stats.zip dsh-token-usage-stats
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dsh-token-usage-stats.tgz dsh-token-usage-stats.zip

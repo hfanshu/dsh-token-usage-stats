@@ -1,0 +1,39 @@
+{
+  "name": "dsh-token-usage-stats",
+  "version": "1.0.5",
+  "description": "Daily, weekly, and monthly token usage statistics dashboard: summary cards, trend chart, per-model usage, a bottom status bar, a /tokenstats command, and an HTTP summary route.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.v6.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "client.v6.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "INSTALL.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  }
+}

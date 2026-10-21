@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Token Usage Stats",
+    "description": "Daily, weekly, and monthly token usage statistics in a bottom status bar, with a /tokenstats command and an HTTP summary route."
+  }
+}
