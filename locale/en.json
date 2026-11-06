@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Token Usage Stats",
-    "description": "Daily, weekly, and monthly token usage statistics in a bottom status bar, with a /tokenstats command and an HTTP summary route."
+    "description": "Daily, weekly, and monthly token usage in a bottom status bar, historical usage replayed from the Host's session logs, a current-session “Usage” tab in the conversation view, and per-project, per-session, and per-conversation breakdowns (cached vs uncached input, cache writes, output, and time), stored in an embedded SQLite database, plus a /tokenstats command and HTTP summary/breakdown routes."
   }
 }

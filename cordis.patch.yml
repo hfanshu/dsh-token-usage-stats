@@ -6,6 +6,21 @@
       name: 'dsh-token-usage-stats'
       config:
         # Day records kept before older ones are pruned (local calendar days).
+        # The same window prunes the per-request rows behind the project,
+        # session, and turn breakdowns.
         retentionDays: 400
         # How many recent days the expanded detail list and /tokenstats show.
         detailDays: 14
+        # SQLite database file. Omitted -> $DSH_HOME/storages/token_usage_stats.sqlite
+        # (default ~/.dsh/storages/token_usage_stats.sqlite). Accepts an absolute
+        # path, a leading `~`, a path relative to $DSH_HOME, or `:memory:`.
+        # dbPath: '~/token-stats.sqlite'
+        # Replay usage the live listener never saw (anything recorded before the
+        # plugin was installed) from the Host's session logs on startup. Sessions
+        # already in the database are skipped, so it is idempotent. Set to false
+        # to keep only live-folded usage.
+        backfillHistory: true
+        # Session-log root. Omitted -> $DSH_HOME/sessions. Accepts an absolute
+        # path, a leading `~`, or a path relative to $DSH_HOME.
+        # sessionsDir: '~/sessions'
+

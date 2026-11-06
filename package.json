@@ -1,28 +1,54 @@
 {
-  "name": "dsh-token-usage-stats",
-  "version": "1.0.5",
-  "description": "Daily, weekly, and monthly token usage statistics dashboard: summary cards, trend chart, per-model usage, a bottom status bar, a /tokenstats command, and an HTTP summary route.",
-  "private": true,
+  "name": "@h643560027/dsh-token-usage-stats",
+  "version": "1.4.0",
+  "description": "Token usage statistics dashboard backed by an embedded SQLite database: per-day totals plus project, session, and conversation-level breakdowns with cached/uncached input split, historical usage replayed from the Host's session logs, a current-session tab in the conversation view, summary cards, trend chart, per-model usage, a bottom status bar, a /tokenstats command, and HTTP summary/breakdown routes.",
   "type": "module",
   "license": "MIT",
+  "author": "hfanshu",
+  "homepage": "https://github.com/hfanshu/dsh-token-usage-stats#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hfanshu/dsh-token-usage-stats.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hfanshu/dsh-token-usage-stats/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "token-usage",
+    "token-stats",
+    "sqlite",
+    "dashboard"
+  ],
+  "main": "./index.js",
   "exports": {
     ".": "./index.js",
-    "./client": "./client.v6.js",
+    "./client": "./client.v8.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
     "index.js",
+    "history.js",
     "client.js",
     "client.v6.js",
+    "client.v7.js",
+    "client.v8.js",
     "cordis.patch.yml",
     "locale/*.json",
+    "test/*.mjs",
     "icon.svg",
     "README.md",
     "INSTALL.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "dsh": {
     "bundle": {
@@ -32,8 +58,12 @@
       "platform": "web",
       "immediately": true,
       "inject": [
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-conversation"
       ]
     }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
   }
 }
