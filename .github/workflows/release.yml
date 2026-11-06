@@ -17,7 +17,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # node:sqlite (used by the persistence layer) needs Node >= 22.5.
+          node-version: '24'
 
       - name: Verify the package manifest
         run: |
@@ -27,6 +28,11 @@ jobs:
         run: |
           node --check index.js
           node --check client.js
+          node --check client.v7.js
+
+      - name: Run the persistence tests
+        run: |
+          node --test test/persistence.test.mjs
 
       - name: Pack the bundle
         run: |
@@ -37,7 +43,7 @@ jobs:
         run: |
           mkdir -p staging/dsh-token-usage-stats
           cp -r index.js client.js client.v*.js cordis.patch.yml icon.svg \
-                package.json README.md INSTALL.md LICENSE locale \
+                package.json README.md INSTALL.md LICENSE locale test \
                 staging/dsh-token-usage-stats/
           cd staging && zip -r ../dsh-token-usage-stats.zip dsh-token-usage-stats
 
