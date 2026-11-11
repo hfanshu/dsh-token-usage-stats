@@ -26,6 +26,7 @@
   "exports": {
     ".": "./index.js",
     "./client": "./client.v8.js",
+    "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },

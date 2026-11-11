@@ -89,7 +89,7 @@
 
 ```yaml
 - id: token-usage-stats
-  name: 'dsh-token-usage-stats'
+  name: '@h643560027/dsh-token-usage-stats'
   config:
     retentionDays: 400   # 保留的天记录数
     detailDays: 14       # 明细列表与命令展示的近 N 天

@@ -13,6 +13,7 @@
  * Usage: node --test test/client.test.mjs   (from the plugin directory)
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
@@ -28,6 +29,17 @@ try {
 
 const SKIP = React === undefined ? 'react is not resolvable from this workspace' : false;
 const CLIENT_URL = new URL('../client.js', import.meta.url);
+const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+test('the bundle patch inserts the Loader row under the package name', () => {
+  // The Host resolves this name and requires the nearest package.json to declare
+  // it; an alias (or a stale name) drops the client half without any error.
+  const patch = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8');
+  assert.ok(
+    patch.includes(`name: '${PKG.name}'`),
+    `cordis.patch.yml must insert the row as name: '${PKG.name}'`,
+  );
+});
 
 /**
  * A stand-in for the Host locale service with the behaviour that matters here:
@@ -84,7 +96,9 @@ async function mount({ state, language = 'zh-CN', locale = null, context = null 
   // A fresh query is a fresh module instance: every call re-runs apply().
   await import(`${CLIENT_URL.href}?tick=${Math.random()}`);
   assert.ok(definition, 'the bundle must call window.__ModuleLoader__.load');
-  assert.equal(definition.id, 'dsh-token-usage-stats');
+  // The Host keys the boot-graph row by the package name and binds a bundle to
+  // its row through this id, so a mismatch silently drops the whole client half.
+  assert.equal(definition.id, PKG.name, 'the client must register under its package name');
 
   // Only the summary/session `useState` is seeded — recognized by its
   // `{ loading: true, … }` initial shape, exactly the hook the Host fills

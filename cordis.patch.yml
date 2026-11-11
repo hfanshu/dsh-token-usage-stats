@@ -2,8 +2,12 @@
 # Row id `token-usage-stats`; every value below can be overridden by a
 # higher-priority user layer in cordis.patch.yml without touching this file.
 - insert:
+    # `name` must be the package's own manifest name: the client-module scan
+    # resolves this specifier and requires the nearest package.json to declare
+    # that same name, otherwise the client half is silently left out of the
+    # boot graph (host half active, no UI).
     - id: token-usage-stats
-      name: 'dsh-token-usage-stats'
+      name: '@h643560027/dsh-token-usage-stats'
       config:
         # Day records kept before older ones are pruned (local calendar days).
         # The same window prunes the per-request rows behind the project,

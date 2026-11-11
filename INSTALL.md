@@ -46,11 +46,11 @@
 
 # 2) 在档案目录把插件链接进依赖（档案名按你的环境替换，桌面版为 desktop，网页版为 web）
 Set-Location "$env:USERPROFILE\.dsh\profiles\<档案名>"
-pnpm add "link:E:/dist/dsh-token-usage-stats"
+pnpm add "@h643560027/dsh-token-usage-stats@link:E:/dist/dsh-token-usage-stats"
 
-# 3) 编辑同目录 package.json：把 "dsh-token-usage-stats" 加入 dsh.profile.bundles 数组
+# 3) 编辑同目录 package.json：把 "@h643560027/dsh-token-usage-stats" 加入 dsh.profile.bundles 数组
 #    {
-#      "dsh": { "profile": { "bundles": [ ..., "dsh-token-usage-stats" ] }
+#      "dsh": { "profile": { "bundles": [ ..., "@h643560027/dsh-token-usage-stats" ] }
 #  }
 
 # 4) 重启 Harness 应用（完全退出后重开）
@@ -74,7 +74,7 @@ pnpm add "link:E:/dist/dsh-token-usage-stats"
 
 ```yaml
 - id: token-usage-stats
-  name: 'dsh-token-usage-stats'
+  name: '@h643560027/dsh-token-usage-stats'
   config:
     retentionDays: 400   # 保留的天记录数（默认 400）
     detailDays: 14       # 底部栏明细与命令展示的近 N 天（默认 14）
@@ -108,6 +108,7 @@ pnpm add "link:E:/dist/dsh-token-usage-stats"
 | 现象 | 处理 |
 |---|---|
 | 底部状态栏不出现 | 插件行未激活：确认插件已启用；查看应用日志中 `token-usage-stats` 关键字。手动安装时确认 `dsh.profile.bundles` 已包含条目且已**重启** |
+| 已启用、Host 正常（`/api/token-stats` 有数据）但**界面上什么都不出现** | Client 半被静默跳过：`cordis.patch.yml` 插入行的 `name` 必须与插件 `package.json` 的 `name` **完全一致**（本插件为 `@h643560027/dsh-token-usage-stats`），且该名字能作为包名从档案目录解析到同一目录（`node_modules/@h643560027/dsh-token-usage-stats`）。用别名（如 `link:` 到 `dsh-token-usage-stats`）安装时名字对不上，Host 照常激活、Client 却不会进 boot graph，也没有报错。修正档案依赖名后重启应用 |
 | 会话标签栏里没有「用量」 | 该标签注册在 `conversation.view` 槽位：先按 **F5** 刷新让 Client 重新加载；确认页面加载的是本次安装的 Client 代次（`package.json` 的 `exports "./client"`）；标签位于「轨迹」与「上下文」之间，窗口过窄时会收进标签栏的溢出菜单 |
 | 状态栏在、仪表盘打不开 | 浏览器按 **F5 刷新**（Client 模块随页面加载；Host 更新则需重启应用） |
 | 改了 Client 代码但界面没变化 | 热更新监听的是 **exports 指向的当前代次文件**：编辑 `client.js` 后需覆盖 `client.vN.js`，约 1 秒自动热替换（无需 F5）；若改动了 `exports "./client"` 换代路径，Host 会缓存该解析结果，**必须重启应用**才生效 |

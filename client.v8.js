@@ -27,7 +27,10 @@
  * logs. Styling inherits the host theme through --dsw-alias-* tokens.
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-token-usage-stats',
+  // Must equal the package.json `name`: the Host keys the boot-graph row by the
+  // package name, and a bundle that registers under any other id is never
+  // associated with its row (the module simply never arrives).
+  id: '@h643560027/dsh-token-usage-stats',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
