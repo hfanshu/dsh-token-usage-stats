@@ -1,6 +1,6 @@
 {
   "name": "@h643560027/dsh-token-usage-stats",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Token usage statistics dashboard backed by an embedded SQLite database: per-day totals plus project, session, and conversation-level breakdowns with cached/uncached input split, historical usage replayed from the Host's session logs, a current-session tab in the conversation view, summary cards, trend chart, per-model usage, a bottom status bar, a /tokenstats command, and HTTP summary/breakdown routes.",
   "type": "module",
   "license": "MIT",
