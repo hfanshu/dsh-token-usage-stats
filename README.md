@@ -32,7 +32,7 @@
 |---|---|
 | 底部状态栏 | `Token 用量  今日 xx · 本周 xx · 本月 xx`，右侧「统计面板 / 明细 / 刷新」 |
 | 会话「用量」标签页 | 会话标签栏里「轨迹」后面的 **用量**：只统计当前会话 |
-| 使用统计面板 | 汇总卡片 → 每日趋势图 → 模型用量 |
+| 使用统计面板 | 汇总卡片 → 每日趋势图 → 模型用量 → **工作空间活跃分布** → **日活/模型/请求大小图表** → 项目/会话/对话下钻 |
 
 > 面板通过 `main` 全局面板注册（与插件市场页同一机制），从状态栏「统计面板」按钮打开，页内「返回会话」回到对话。
 >
@@ -45,6 +45,8 @@
   - **每日 Token 趋势图**：「近 7 日 / 近 30 日」切换的 SVG 面积折线图；**整图任意位置可悬停**，显示参考线、日期与逐日精确用量（输入/输出/缓存读/缓存写/请求数拆分）；
   - **项目 / 会话 / 对话**：三级下钻列表，逐行显示总 Token、命中缓存输入、未命中缓存输入、输出、请求数与时间；点项目看它的会话，点会话看它的每次对话；
   - **模型用量**：按 `provider/model` 归属的用量排行（进度条 + 明细拆分）。
+  - **工作空间活跃分布**：按**工作空间**或**按会话**排行，可按 **Token / 会话数**（会话维度为请求数）切换；支持名称搜索与 **2X** 放大，每行显示总量、占比、会话数（或请求数）与**近 30 天逐日活跃条**（悬浮显示当日 Token）；同名工作空间自动用最短唯一路径后缀区分。数据来自 `GET /api/token-stats/activity`，与汇总分开拉取（60 秒刷新），不增加主接口体积。
+  - **用量分析（单个卡片 + 四个标签）**：同一张卡片内用标签切换四张图表——**日活分布**（近 14 天 × 24 小时热力网格 + 凌晨/上午/下午/晚间四时段占比与「低→高」图例）、**0–24 时 · 按模型**（Top 6 模型按小时的半透明面积叠加）、**每日模型用量**（近 30 天按模型堆叠柱状图，Top 8 + 其他，图例带各模型窗口总量）、**请求大小分布**（Top 8 模型单次请求 Token 的 50% / 90% 分位与分布曲线，每行各自归一化、共享横轴，竖线 = 50%、圆点 = 90%）；数据来自 `GET /api/token-stats/insights`，一次请求拉齐、60 秒刷新，默认显示「日活分布」。
 - **会话「用量」标签页**（`conversation.view` 槽位，「轨迹」后面）：
   - **只看当前会话**：卡片显示该会话的累计 Token、未命中缓存输入、命中缓存输入、缓存写入、输出、计费请求数与对话轮数；顶部标注项目名与会话标题；
   - **逐轮明细**：每次对话一行（序号 `#N`、开始时间 · 时长、总 Token、命中缓存 / 未命中输入 / 输出 / 请求数），精确值在悬停提示里；
@@ -60,6 +62,8 @@
 - **HTTP 接口**：
   - `GET /api/token-stats`：完整汇总（`v:3`：today/week/month、recent/trend、heatmap、stats、models、allTime，外加 `requestCount`、`projects`、`sessions`、`turns`）。
   - `GET /api/token-stats/breakdown?by=project|session|turn&limit=N&project=<cwd>&session=<id>`：按维度分页下钻，返回 `rows` 与整段筛选集的 `totals`。
+  - `GET /api/token-stats/activity`：工作空间活跃分布（`v:1`：`days`（30 个本地日）、`workspaces`、`sessions`（前 80 个）、`workspaceTotal / workspaceSessions / workspaceRequests`、`sessionTotal / sessionRequests`、`truncatedSessions`）；每行带与 `days` 对齐的 `series`（逐日 Token，未活跃日为 0）。
+  - `GET /api/token-stats/insights`：`hourly`（14 天 × 24 小时网格、模型 × 小时、四时段占比）、`daily`（近 30 天模型配比，Top 8 + other）、`sizes`（Top 8 模型的请求大小直方图、`p50` / `p90` / 共享 `axisMax`）。
 
 ## 统计口径
 
@@ -125,7 +129,7 @@ dsh-token-usage-stats/
 - **存储层**：`node:sqlite` 的 `DatabaseSync`（Node ≥ 22.5 / 本 Harness 的 Electron 44 + Node 24 内置）。表均为 `STRICT`，写入走 `BEGIN IMMEDIATE … COMMIT` 的单事务；`application_id`/`user_version` 守卫防止误开其他应用的库（旧库原地升级）。若运行时缺少该内置模块，插件降级为内存统计而不是加载失败。
 - **健壮性**：事件字段在进入 SQLite 之前全部校验（`turn`/`step` 必须是非负安全整数、`time` 必须可解析）；畸形事件只被跳过，绝不会污染整批写入。写入批次连续失败 3 次后会丢弃该批并告警，避免单条坏数据永久卡死持久化。
 - **聚合不漂移**：`requests` 是唯一事实来源，`projects`/`sessions`/`turns` 的聚合在每次打开时由它重算（启动早期已折叠的部分再叠加），实时折叠只做增量维护；替换带来的时间跨度变化也会跟随收缩。
-- **Client 数据通道**是同源 HTTP 路由而非远程服务协议，浏览器 `fetch('/api/token-stats')` 与 `fetch('/api/token-stats/breakdown')` 自带会话 Cookie；宿主侧路由本身不鉴权，仅返回聚合数字（无消息内容、无凭据）。「用量」标签页复用 breakdown 路由（`by=turn&session=<id>&limit=200`），`totals` 由服务端在该会话的**全部**对话行上求和，因此行列表截断不会影响汇总值。
+- **Client 数据通道**是同源 HTTP 路由而非远程服务协议，浏览器 `fetch('/api/token-stats')`、`fetch('/api/token-stats/breakdown')` 与 `fetch('/api/token-stats/activity')` 自带会话 Cookie；宿主侧路由本身不鉴权，仅返回聚合数字（无消息内容、无凭据）。「用量」标签页复用 breakdown 路由（`by=turn&session=<id>&limit=200`），`totals` 由服务端在该会话的**全部**对话行上求和，因此行列表截断不会影响汇总值。
 - **Client 代次机制**：浏览器模块身份由 `exports "./client"` 的路径决定，因此 Client 改动通过新增 `client.vN.js` 并改 export 路径来换代。**注意（实测）**：Host 把 `exports "./client"` 的解析结果缓存到进程重启，所以改 export 路径（换代）**需要重启应用**才生效，仅刷新页面不够；Host 改动同样需重启。修改 `client.js` 后请同步覆盖当前代次文件（当前 `client.v8.js`）。
 - **Client 热更新（无需刷新）**：宿主内置 `client-hmr`，每 500ms 轮询当前代次文件的 mtime/ctime/size，变化即经 SSE `/plugins/events` 推 `rebuilt` 帧，浏览器拆旧 fiber、清 owned styles 后重新 import——**同步覆盖当前代次文件后约 1 秒生效，无需 F5**。因此日常改样式/逻辑的流程是：编辑 `client.js` → 覆盖当前代次文件 → 自动热更新。热替换要求插件自身可重入：样式标签需带 `data-plugin` 属性且 `ensureStyle` 要就地更新（否则旧标签既不会被 Host 清理、CSS 也永远不刷新），slot 注册走 `ctx.slots.inject` 以便随 fiber 注销。
 - **旧 Host 兼容**：Client 只在 payload 带 `projects`/`sessions`/`turns` 时才渲染下钻区块，因此页面配旧版 Host 也不会报错，只是看不到新维度。

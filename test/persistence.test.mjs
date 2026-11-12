@@ -150,6 +150,12 @@ async function settle() {
 const DAY = 86400000;
 const BASE = new Date(2026, 9, 20, 12, 0, 0).getTime(); // 2026-10-20 12:00 local
 
+/** Local calendar day key of one epoch millisecond, matching the host's days. */
+function localDayKey(ms) {
+  const date = new Date(ms);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 /**
  * A session stub shaped like the host's live Session: `header` carries the
  * durable identity (`id`, `cwd`), which is what project/session keying reads.
@@ -215,6 +221,121 @@ test('fresh database: creates the file, persists a settlement, and survives rest
   assert.equal(after.allTime.settlements, 1);
   assert.equal(after.models[0].input, 100);
   await second.dispose();
+});
+
+test('activity distribution: per-project/session daily series survives restart', async () => {
+  const dir = scratch();
+  const dbPath = join(dir, 'stats.sqlite');
+  const now = Date.now();
+  const alpha = { id: 'act-alpha', header: { id: 'act-alpha', cwd: 'E:\\project\\alpha' } };
+  const beta = { id: 'act-beta', header: { id: 'act-beta', cwd: 'E:\\project\\beta' } };
+  const readActivity = async (harness) => {
+    const route = harness.routes.find((entry) => entry.path === '/api/token-stats/activity');
+    assert.ok(route, 'the activity route must be registered');
+    return JSON.parse(await bodyOf(route, { method: 'GET' }));
+  };
+
+  const first = fakeContext();
+  apply(first.ctx, { dbPath });
+  await settle();
+  first.emit(alpha, settlement(1, 0, usageA, now));
+  first.emit(alpha, settlement(2, 0, usageA, now));
+  first.emit(beta, settlement(1, 0, usageB, now));
+  await settle();
+
+  const live = await readActivity(first);
+  assert.equal(live.v, 1);
+  assert.equal(live.days.length, 30);
+  assert.equal(live.days[29], localDayKey(now), 'the series must end on the local today');
+  const alphaRow = live.workspaces.find((row) => row.title === 'alpha');
+  assert.ok(alphaRow, 'the alpha workspace must appear');
+  assert.equal(alphaRow.total, 2230);
+  assert.equal(alphaRow.sessions, 1);
+  assert.equal(alphaRow.series[29], 2230, 'today carries both settlements');
+  assert.equal(alphaRow.series.reduce((sum, value) => sum + value, 0), 2230);
+  const betaRow = live.workspaces.find((row) => row.title === 'beta');
+  assert.equal(betaRow.total, 2227);
+  assert.equal(live.workspaceTotal, 4457);
+  const alphaSession = live.sessions.find((row) => row.id === 'act-alpha');
+  assert.ok(alphaSession, 'the session row must appear');
+  assert.equal(alphaSession.series[29], 2230);
+  assert.equal(live.sessionTotal, 4457);
+  assert.equal(live.sessionRequests, 3);
+  await first.dispose();
+
+  const second = fakeContext();
+  apply(second.ctx, { dbPath });
+  await settle();
+  const replayed = await readActivity(second);
+  const alphaAgain = replayed.workspaces.find((row) => row.title === 'alpha');
+  assert.equal(alphaAgain.series[29], 2230, 'restart must rebuild the series from the requests table');
+  assert.equal(alphaAgain.total, 2230);
+  await second.dispose();
+});
+
+test('activity distribution: memory-only mode still tracks the daily series', async () => {
+  const dir = scratch();
+  const blocked = join(dir, 'not-a-database');
+  mkdirSync(blocked, { recursive: true });
+  const harness = fakeContext();
+  apply(harness.ctx, { dbPath: blocked });
+  await settle();
+  const now = Date.now();
+  const session = { id: 'mem-alpha', header: { id: 'mem-alpha', cwd: 'E:\\project\\memory' } };
+  harness.emit(session, settlement(1, 0, usageA, now));
+  await settle();
+  const route = harness.routes.find((entry) => entry.path === '/api/token-stats/activity');
+  assert.ok(route, 'the activity route must be registered without SQLite');
+  const data = JSON.parse(await bodyOf(route, { method: 'GET' }));
+  const row = data.workspaces.find((entry) => entry.title === 'memory');
+  assert.equal(row.series[29], 1115);
+  await harness.dispose();
+});
+
+test('insights route: hourly grid, daily model mix and request-size percentiles', async () => {
+  const dir = scratch();
+  const dbPath = join(dir, 'stats.sqlite');
+  const harness = fakeContext();
+  apply(harness.ctx, { dbPath });
+  await settle();
+  const recent = Date.now() - 2 * 3600 * 1000;
+  const later = Date.now() - 60 * 60 * 1000;
+  const session = { id: 'ins-a', header: { id: 'ins-a', cwd: 'E:\\project\\insights' } };
+  harness.emit(session, { type: 'request/header', time: recent, data: { header: { config: { provider: 'deepseek', model: 'v4' } } } });
+  harness.emit(session, settlement(1, 0, usageA, recent));
+  harness.emit(session, { type: 'request/header', time: later, data: { header: { config: { provider: 'deepseek', model: 'v5' } } } });
+  harness.emit(session, settlement(2, 0, usageB, later));
+  await settle();
+
+  const route = harness.routes.find((entry) => entry.path === '/api/token-stats/insights');
+  assert.ok(route, 'the insights route must be registered');
+  const data = JSON.parse(await bodyOf(route, { method: 'GET' }));
+  assert.equal(data.v, 1);
+  assert.equal(data.hourly.days.length, 14);
+  assert.equal(data.hourly.byDay.length, 14);
+  const byDayTotal = data.hourly.byDay.reduce((sum, row) => sum + row.hours.reduce((inner, value) => inner + value, 0), 0);
+  assert.equal(byDayTotal, 3342, 'both settlements must land in the 14-day hour grid');
+  assert.equal(data.hourly.total, 3342);
+  const share = data.hourly.buckets.reduce((sum, bucket) => sum + bucket.share, 0);
+  assert.ok(Math.abs(share - 1) < 1e-9, 'the four time buckets must cover the window');
+  assert.equal(data.hourly.byModel.length, 2);
+  assert.deepEqual(data.hourly.byModel.map((row) => row.model).sort(), ['deepseek/v4', 'deepseek/v5']);
+  assert.ok(data.hourly.byDay.some((row) => row.hours.some((value) => value > 0)), 'at least one hour must carry usage');
+
+  const legend = data.daily.models.map((row) => row.id);
+  assert.ok(legend.includes('deepseek/v4'), 'the daily mix must attribute v4');
+  assert.ok(legend.includes('deepseek/v5'), 'the daily mix must attribute v5');
+  assert.equal(data.daily.days.length, 30);
+
+  assert.equal(data.sizes.total, 2);
+  assert.equal(data.sizes.models.length, 2);
+  const v4 = data.sizes.models.find((row) => row.model === 'deepseek/v4');
+  assert.equal(v4.count, 1);
+  assert.equal(v4.p50, 1115);
+  assert.equal(v4.p90, 1115);
+  assert.equal(v4.buckets.reduce((sum, value) => sum + value, 0), 1);
+  assert.ok(data.sizes.axisMax >= v4.p90);
+  await harness.dispose();
 });
 
 test('same (turn, step) sample replaces instead of double counting; retry accumulates', async () => {

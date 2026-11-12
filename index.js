@@ -56,6 +56,8 @@ import { listSessionLogs, readHeader, readSessionRecords, supportsZstd } from '.
 
 const SERVICE_ROUTE = '/api/token-stats';
 const BREAKDOWN_ROUTE = '/api/token-stats/breakdown';
+const ACTIVITY_ROUTE = '/api/token-stats/activity';
+const INSIGHTS_ROUTE = '/api/token-stats/insights';
 const DB_FILE_NAME = 'token_usage_stats.sqlite';
 const LEGACY_JSON_FILE_NAME = 'token_usage_stats.json';
 const SCHEMA_VERSION = 2;
@@ -64,6 +66,21 @@ const APPLICATION_ID = 0x54555331;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const HEATMAP_DAYS = 365;
 const TREND_DAYS = 30;
+/** Day columns carried by the workspace-activity distribution. */
+const ACTIVITY_DAYS = 30;
+/** Rows the activity route returns per dimension (client sorts/filters them). */
+const ACTIVITY_SESSION_ROWS = 80;
+/** How long per-day project/session buckets stay resident before pruning. */
+const ACTIVITY_RETENTION_DAYS = 90;
+/** Rows of the hour x day activity grid. */
+const HOURLY_DAYS = 14;
+/** Days of the per-model daily usage chart. */
+const DAILY_MODEL_DAYS = 30;
+/** Requests-size distribution: models shown and histogram buckets. */
+const SIZE_MODELS = 8;
+const SIZE_BUCKETS = 40;
+/** Request samples feeding the size distribution (and the retention bound). */
+const SIZE_WINDOW_DAYS = 90;
 const MAX_MODELS_PER_DAY = 24;
 const UNKNOWN_MODEL = 'unknown';
 const UNKNOWN_PROJECT = 'unknown';
@@ -445,8 +462,14 @@ function dayRowOf(key, record) {
   return { date: key, input, output, cacheRead, cacheWrite, settlements, turnMs, longestMs, total: input + output + cacheRead + cacheWrite };
 }
 
-/** Zero-filled ascending day rows for the last `count` local days. */
-function dayRows(count, now, days) {
+/** Nearest-rank percentile of an ascending numeric array. */
+function percentileOf(sorted, quantile) {
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(quantile * sorted.length) - 1));
+  return sorted[index];
+}
+
+/** Zero-filled ascending day rows for the last `count` local days. */function dayRows(count, now, days) {
   const rows = [];
   for (let index = count - 1; index >= 0; index -= 1) {
     const key = dayKeyOf(now.getTime() - index * 86400000);
@@ -1025,6 +1048,15 @@ export function apply(ctx, config) {
   const sessions = new Map();
   /** @type {Map<string, ReturnType<typeof zeroTurn>>} turn key -> record */
   const turns = new Map();
+  /**
+   * Per-project daily token totals for the activity distribution
+   * (project id -> Map<day key, tokens>). Hydrated from `requests` on open and
+   * kept in step by every fold, so the panel works with or without SQLite.
+   * @type {Map<string, Map<string, number>>}
+   */
+  const activityProjects = new Map();
+  /** Per-session daily token totals (session id -> Map<day key, tokens>). */
+  const activitySessions = new Map();
   /** Request rows awaiting a write (request id -> row). */
   const pendingRequests = new Map();
   /** Request ids to delete on the next flush (pruned days). */
@@ -1103,6 +1135,15 @@ export function apply(ctx, config) {
       if (key < cutoff) {
         days.delete(key);
         dirtyKeys.add(key); // absent record -> delete on the database
+      }
+    }
+    // The activity strips only read the recent window; older buckets are dead
+    // weight once a replay or a long uptime pushed them in.
+    const activityCutoff = dayKeyOf(Date.now() - ACTIVITY_RETENTION_DAYS * 86400000);
+    for (const map of [activityProjects, activitySessions]) {
+      for (const [id, series] of map) {
+        for (const key of [...series.keys()]) if (key < activityCutoff) series.delete(key);
+        if (series.size === 0) map.delete(id);
       }
     }
   };
@@ -1598,6 +1639,32 @@ export function apply(ctx, config) {
     scheduleFlush();
   }
 
+  /** Total tokens one request row contributes to the activity strips. */
+  function requestTokensOf(row) {
+    return (row.input ?? 0) + (row.output ?? 0) + (row.cacheRead ?? 0) + (row.cacheWrite ?? 0);
+  }
+
+  /** Add one daily token delta to one activity dimension map. */
+  function addActivityTo(map, id, day, tokens) {
+    if (typeof id !== 'string' || id.length === 0 || typeof day !== 'string') return;
+    if (!Number.isFinite(tokens) || tokens === 0) return;
+    let series = map.get(id);
+    if (series === undefined) {
+      series = new Map();
+      map.set(id, series);
+    }
+    const next = (series.get(day) ?? 0) + tokens;
+    if (next === 0) series.delete(day);
+    else series.set(day, next);
+  }
+
+  /** Mirror one request row into the project/session daily activity maps. */
+  function trackActivity(row, sign) {
+    const tokens = sign * requestTokensOf(row);
+    addActivityTo(activityProjects, row.projectId, row.day, tokens);
+    addActivityTo(activitySessions, row.sessionId, row.day, tokens);
+  }
+
   /** Add (sign 1) or subtract (sign -1) one request row from its aggregates. */
   function applyRequestBuckets(row, sign) {
     const project = projects.get(row.projectId) ?? ensureProject({ projectId: row.projectId }, row.ts);
@@ -1611,6 +1678,7 @@ export function apply(ctx, config) {
       target.reasoning += sign * bucket.reasoning;
       target.requests += sign;
     }
+    trackActivity(row, sign);
     if (sign > 0) {
       spanOf(project, row.ts);
       spanOf(session, row.ts);
@@ -1681,6 +1749,32 @@ export function apply(ctx, config) {
       reasoning: Number(row.reasoning),
       requests: 1,
     };
+  }
+
+  /**
+   * Rebuild the per-day activity maps from the durable `requests` table plus
+   * the folds that ran before the open settled. Rows pending replacement or
+   * deletion are skipped, so a restart cannot double count them.
+   * @param {import('node:sqlite').DatabaseSync} db - the open database.
+   */
+  function hydrateActivity(db) {
+    activityProjects.clear();
+    activitySessions.clear();
+    const cutoff = dayKeyOf(Date.now() - ACTIVITY_RETENTION_DAYS * 86400000);
+    const rows = db.prepare(
+      'SELECT id, project_id, session_id, day, input + output + cache_read + cache_write AS tokens FROM requests WHERE day >= ?',
+    ).all(cutoff);
+    for (const row of rows) {
+      if (typeof row.id === 'string' && (pendingRequests.has(row.id) || deletedRequests.has(row.id))) continue;
+      const tokens = Number(row.tokens);
+      addActivityTo(activityProjects, row.project_id, row.day, tokens);
+      addActivityTo(activitySessions, row.session_id, row.day, tokens);
+    }
+    for (const request of pendingRequests.values()) {
+      const tokens = requestTokensOf(request);
+      addActivityTo(activityProjects, request.projectId, request.day, tokens);
+      addActivityTo(activitySessions, request.sessionId, request.day, tokens);
+    }
   }
 
   /**
@@ -1763,6 +1857,7 @@ export function apply(ctx, config) {
       dirtySessions.add(request.sessionId);
       dirtyTurns.add(turnKeyOf(request.sessionId, request.turn));
     }
+    hydrateActivity(db);
   }
 
   /** Recompute every aggregate bucket from the durable `requests` table. */
@@ -2010,9 +2105,205 @@ export function apply(ctx, config) {
     };
   };
 
+  /**
+   * The workspace-activity distribution: every project and the most active
+   * sessions, each with a zero-filled per-day token series for the last
+   * ACTIVITY_DAYS days. Totals are all-time, matching the summary rows, so the
+   * strip reads as "how recently / how much this identity worked".
+   * @returns {object} the wire payload.
+   */
+  const activityOf = () => {
+    const now = new Date();
+    const dayKeys = [];
+    for (let index = ACTIVITY_DAYS - 1; index >= 0; index -= 1) dayKeys.push(dayKeyOf(now.getTime() - index * 86400000));
+    const indexOfDay = new Map(dayKeys.map((key, index) => [key, index]));
+    const seriesOf = (map, id) => {
+      const series = new Array(dayKeys.length).fill(0);
+      const buckets = map.get(id);
+      if (buckets !== undefined) {
+        for (const [day, tokens] of buckets) {
+          const index = indexOfDay.get(day);
+          if (index !== undefined) series[index] = tokens;
+        }
+      }
+      return series;
+    };
+    const workspaceRows = [...projects.values()]
+      .map((record) => ({
+        id: record.id,
+        title: record.title,
+        sessions: countSessionsOf(record.id),
+        ...requestRowOf(record.bucket),
+        series: seriesOf(activityProjects, record.id),
+      }))
+      .sort((a, b) => b.total - a.total);
+    const allSessionRows = [...sessions.values()]
+      .map(sessionRowOf)
+      .sort((a, b) => b.total - a.total);
+    const sessionRows = allSessionRows
+      .slice(0, ACTIVITY_SESSION_ROWS)
+      .map((row) => ({ ...row, series: seriesOf(activitySessions, row.id) }));
+    const sum = (rows, field) => rows.reduce((total, row) => total + (row[field] ?? 0), 0);
+    return {
+      v: 1,
+      now: Date.now(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+      days: dayKeys,
+      workspaces: workspaceRows,
+      workspaceTotal: sum(workspaceRows, 'total'),
+      workspaceSessions: sum(workspaceRows, 'sessions'),
+      workspaceRequests: sum(workspaceRows, 'requests'),
+      sessions: sessionRows,
+      sessionTotal: sum(allSessionRows, 'total'),
+      sessionRequests: sum(allSessionRows, 'requests'),
+      truncatedSessions: allSessionRows.length > sessionRows.length,
+    };
+  };
+
+  /**
+   * The remaining dashboard charts: hour x day activity, 24-hour model
+   * activity, the daily model mix, and the per-model request-size
+   * distribution. Every series is derived on demand from the retained
+   * `requests` rows (or the in-memory pending rows without SQLite), so no
+   * additional state has to be persisted.
+   * @returns {object} the wire payload.
+   */
+  const insightsOf = () => {
+    const now = new Date();
+    const hourlyKeys = [];
+    for (let index = HOURLY_DAYS - 1; index >= 0; index -= 1) hourlyKeys.push(dayKeyOf(now.getTime() - index * 86400000));
+    const hourlyIndex = new Map(hourlyKeys.map((key, index) => [key, index]));
+    const byDay = hourlyKeys.map((day) => ({ day, hours: new Array(24).fill(0) }));
+    const hourlyTotals = new Array(24).fill(0);
+    const modelHours = new Map();
+    const modelSizes = new Map();
+    const sizeCutoff = dayKeyOf(now.getTime() - SIZE_WINDOW_DAYS * 86400000);
+    const modelOf = (row) => (typeof row.model === 'string' && row.model.length > 0 ? row.model : UNKNOWN_MODEL);
+    const ingest = (row) => {
+      const tokens = (row.input ?? 0) + (row.output ?? 0) + (row.cacheRead ?? row.cache_read ?? 0) + (row.cacheWrite ?? row.cache_write ?? 0);
+      const ts = Number(row.ts);
+      if (!Number.isFinite(tokens) || tokens < 0 || !Number.isFinite(ts)) return;
+      const day = typeof row.day === 'string' ? row.day : '';
+      const hour = new Date(ts).getHours();
+      const daySlot = hourlyIndex.get(day);
+      if (daySlot !== undefined) {
+        byDay[daySlot].hours[hour] += tokens;
+        hourlyTotals[hour] += tokens;
+        const model = modelOf(row);
+        let hours = modelHours.get(model);
+        if (hours === undefined) {
+          hours = new Array(24).fill(0);
+          modelHours.set(model, hours);
+        }
+        hours[hour] += tokens;
+      }
+      if (day >= sizeCutoff) {
+        const model = modelOf(row);
+        let values = modelSizes.get(model);
+        if (values === undefined) {
+          values = [];
+          modelSizes.set(model, values);
+        }
+        values.push(tokens);
+      }
+    };
+    const current = state;
+    if (current.db !== null) {
+      const rows = current.db.prepare(
+        'SELECT day, ts, model, input, output, cache_read, cache_write FROM requests WHERE day >= ?',
+      ).all(sizeCutoff);
+      for (const row of rows) ingest(row);
+    }
+    for (const row of pendingRequests.values()) ingest(row);
+
+    const windowTotal = hourlyTotals.reduce((sum, value) => sum + value, 0);
+    const buckets = [['night', 0, 6], ['morning', 6, 12], ['afternoon', 12, 18], ['evening', 18, 24]].map(([id, from, to]) => {
+      let tokens = 0;
+      for (let hour = from; hour < to; hour += 1) tokens += hourlyTotals[hour];
+      return { id, from, to, tokens, share: windowTotal > 0 ? tokens / windowTotal : 0 };
+    });
+    const modelHourRows = [...modelHours.entries()]
+      .map(([model, hours]) => ({ model, hours, total: hours.reduce((sum, value) => sum + value, 0) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
+
+    const dailyKeys = [];
+    for (let index = DAILY_MODEL_DAYS - 1; index >= 0; index -= 1) dailyKeys.push(dayKeyOf(now.getTime() - index * 86400000));
+    const totalsByModel = new Map();
+    const rawDaily = dailyKeys.map((dayKey) => {
+      const record = days.get(dayKey);
+      const models = {};
+      if (record !== undefined) {
+        for (const [id, bucket] of Object.entries(record.models)) {
+          const tokens = bucket.input + bucket.output + bucket.cacheRead + bucket.cacheWrite;
+          if (tokens <= 0) continue;
+          models[id] = tokens;
+          totalsByModel.set(id, (totalsByModel.get(id) || 0) + tokens);
+        }
+      }
+      return { day: dayKey, models };
+    });
+    const rankedModels = [...totalsByModel.entries()].sort((a, b) => b[1] - a[1]);
+    const topModels = rankedModels.slice(0, 8).map(([id]) => id);
+    const topSet = new Set(topModels);
+    const dailyRows = rawDaily.map((row) => {
+      const models = {};
+      let other = 0;
+      for (const [id, tokens] of Object.entries(row.models)) {
+        if (topSet.has(id)) models[id] = tokens;
+        else other += tokens;
+      }
+      if (other > 0) models.other = other;
+      return { day: row.day, models };
+    });
+    const dailyLegend = topModels.map((id) => ({ id, total: totalsByModel.get(id) || 0 }));
+    if (rankedModels.length > topModels.length) {
+      dailyLegend.push({ id: 'other', total: rankedModels.slice(topModels.length).reduce((sum, [, value]) => sum + value, 0) });
+    }
+
+    const sizeModels = [...modelSizes.entries()]
+      .map(([model, values]) => ({ model, values }))
+      .sort((a, b) => b.values.length - a.values.length)
+      .slice(0, SIZE_MODELS);
+    const allValues = [];
+    for (const entry of sizeModels) allValues.push(...entry.values);
+    const axisMax = Math.max(1, percentileOf(allValues.slice().sort((a, b) => a - b), 0.99));
+    const sizeRows = sizeModels.map((entry) => {
+      const sorted = entry.values.slice().sort((a, b) => a - b);
+      const histogram = new Array(SIZE_BUCKETS).fill(0);
+      let max = 0;
+      for (const value of entry.values) {
+        if (value > max) max = value;
+        const slot = Math.min(SIZE_BUCKETS - 1, Math.floor((value / axisMax) * SIZE_BUCKETS));
+        histogram[slot] += 1;
+      }
+      return {
+        model: entry.model,
+        count: entry.values.length,
+        p50: percentileOf(sorted, 0.5),
+        p90: percentileOf(sorted, 0.9),
+        max,
+        buckets: histogram,
+      };
+    });
+
+    return {
+      v: 1,
+      now: Date.now(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+      hourly: { days: hourlyKeys, hours: 24, byDay, byModel: modelHourRows, buckets, total: windowTotal },
+      daily: { days: dailyRows, models: dailyLegend },
+      sizes: {
+        total: sizeRows.reduce((sum, row) => sum + row.count, 0),
+        axisMax,
+        buckets: SIZE_BUCKETS,
+        models: sizeRows,
+      },
+    };
+  };
+
   /** How many sessions one project owns. */
-  function countSessionsOf(projectId) {
-    let count = 0;
+  function countSessionsOf(projectId) {    let count = 0;
     for (const record of sessions.values()) if (record.projectId === projectId) count += 1;
     return count;
   }
@@ -2153,6 +2444,46 @@ export function apply(ctx, config) {
       res.end(req.method === 'HEAD' ? undefined : body);
     },
   }), 'dsh-token-usage-stats: breakdown route');
+
+  // ---- workspace activity distribution (dashboard section) ------------------
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: ACTIVITY_ROUTE,
+    handler: async (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405, { allow: 'GET, HEAD' });
+        res.end();
+        return;
+      }
+      const body = JSON.stringify(activityOf());
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+        'cache-control': 'no-store',
+      });
+      res.end(req.method === 'HEAD' ? undefined : body);
+    },
+  }), 'dsh-token-usage-stats: activity route');
+
+  // ---- hourly / model / request-size charts (dashboard sections) ------------
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: INSIGHTS_ROUTE,
+    handler: async (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405, { allow: 'GET, HEAD' });
+        res.end();
+        return;
+      }
+      const body = JSON.stringify(insightsOf());
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+        'cache-control': 'no-store',
+      });
+      res.end(req.method === 'HEAD' ? undefined : body);
+    },
+  }), 'dsh-token-usage-stats: insights route');
 
   // ---- /tokenstats slash command (optional) --------------------------------
   ctx.inject(['commands'], () => ctx.commands.register({

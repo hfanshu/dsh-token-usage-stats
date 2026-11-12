@@ -14,7 +14,10 @@
  *      (key `token-usage-stats`): summary cards, a GitHub-style token
  *      activity heatmap with 每日/每周/累计 modes, a 7/30-day trend chart,
  *      a 12-month token bar chart (aggregated from the heatmap window),
- *      a per-model usage breakdown, and a 项目/会话/对话 breakdown with
+ *      a per-model usage breakdown, a 工作空间活跃分布 ranking (workspaces or
+ *      sessions, tokens or session counts, search + 2X, 30-day daily strip),
+ *      four analytics charts (day x hour heat grid, 0–24h by model, daily
+ *      model mix, request-size percentiles), and a 项目/会话/对话 breakdown with
  *      drill-down (project -> sessions -> turns) plus breadcrumb navigation;
  *      the breakdown and session-turn lists paginate client-side, 10 per page.
  *   3. A "用量" conversation-view tab in the session tab strip, immediately
@@ -37,6 +40,8 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-token-usage-stats';
     const ROUTE = '/api/token-stats';
     const BREAKDOWN_ROUTE = '/api/token-stats/breakdown';
+    const ACTIVITY_ROUTE = '/api/token-stats/activity';
+    const INSIGHTS_ROUTE = '/api/token-stats/insights';
     const REFRESH_MS = 30000;
     const PANEL_ID = 'token-usage-stats';
     // Session tab: `conversation.view` orders are chat=0, trajectory=10,
@@ -148,6 +153,55 @@ window.__ModuleLoader__.load({
         'session.turnLabel': '#{{turn}}',
         'session.topN': '仅展示最近 {{count}} 轮',
         'session.footer': '只统计当前会话 · 每 30 秒自动刷新',
+        'activity.title': '工作空间活跃分布',
+        'activity.byWorkspace': '按工作空间',
+        'activity.bySession': '按会话',
+        'activity.metricToken': '按 Token',
+        'activity.metricSessions': '按会话数',
+        'activity.metricRequests': '按请求数',
+        'activity.search': '搜索…',
+        'activity.sessions': '{{count}} 会话',
+        'activity.requests': '{{count}} 请求',
+        'activity.zoom': '2X',
+        'activity.zoomHint': '放大活跃条',
+        'activity.window': '近 30 天',
+        'activity.loading': '活跃数据加载中…',
+        'activity.error': '活跃数据加载失败',
+        'activity.retry': '重试',
+        'activity.empty': '窗口期内没有活跃记录',
+        'activity.emptyHint': '最近 30 天的按日 Token 用量会显示在这里。',
+        'activity.noMatch': '没有匹配的名称',
+        'activity.noMatchHint': '换个关键词再试试。',
+        'activity.truncated': '仅展示前 {{count}} 个会话',
+        'activity.footer': '合计 {{total}} · {{days}} 天窗口',
+        'insights.loading': '图表加载中…',
+        'insights.error': '图表加载失败',
+        'insights.retry': '重试',
+        'insights.title': '用量分析',
+        'insights.tab.hourly': '日活分布',
+        'insights.tab.modelHour': '0–24 时 · 按模型',
+        'insights.tab.dailyModel': '每日模型用量',
+        'insights.tab.sizes': '请求大小分布',
+        'hourly.title': '日活分布',
+        'hourly.window': '近 14 天',
+        'hourly.low': '低',
+        'hourly.high': '高',
+        'hourly.hourTick': '{{hour}}时',
+        'bucket.night': '凌晨',
+        'bucket.morning': '上午',
+        'bucket.afternoon': '下午',
+        'bucket.evening': '晚间',
+        'modelHour.title': '0–24 时分布 · 按模型',
+        'dailyModel.title': '每日模型用量比例',
+        'dailyModel.other': '其他',
+        'sizes.title': '单次请求大小分布',
+        'sizes.model': '模型',
+        'sizes.count': '次数',
+        'sizes.p50': '50%',
+        'sizes.p90': '90%',
+        'sizes.total': 'TOP {{models}} 模型 · 共 {{count}} 次',
+        'sizes.note': '每行独立分布（各自归一化）；竖线 = 50%，圆点 = 90%',
+        'sizes.empty': '暂无请求样本',
       },
       en: {
         'bar.label': 'Token usage statistics',
@@ -246,6 +300,55 @@ window.__ModuleLoader__.load({
         'session.turnLabel': '#{{turn}}',
         'session.topN': 'Latest {{count}} turns only',
         'session.footer': 'This session only · refreshes every 30s',
+        'activity.title': 'Workspace activity',
+        'activity.byWorkspace': 'Workspaces',
+        'activity.bySession': 'Sessions',
+        'activity.metricToken': 'Tokens',
+        'activity.metricSessions': 'Sessions',
+        'activity.metricRequests': 'Calls',
+        'activity.search': 'Search…',
+        'activity.sessions': '{{count}} sessions',
+        'activity.requests': '{{count}} calls',
+        'activity.zoom': '2X',
+        'activity.zoomHint': 'Enlarge the activity bars',
+        'activity.window': 'Last 30 days',
+        'activity.loading': 'Loading activity…',
+        'activity.error': 'Failed to load activity',
+        'activity.retry': 'Retry',
+        'activity.empty': 'No activity in this window',
+        'activity.emptyHint': 'Daily token usage for the last 30 days appears here.',
+        'activity.noMatch': 'No matching name',
+        'activity.noMatchHint': 'Try a different keyword.',
+        'activity.truncated': 'Top {{count}} sessions only',
+        'activity.footer': 'Total {{total}} · {{days}}-day window',
+        'insights.loading': 'Loading charts…',
+        'insights.error': 'Failed to load charts',
+        'insights.retry': 'Retry',
+        'insights.title': 'Usage analytics',
+        'insights.tab.hourly': 'Hourly activity',
+        'insights.tab.modelHour': '0–24h by model',
+        'insights.tab.dailyModel': 'Daily model mix',
+        'insights.tab.sizes': 'Request size',
+        'hourly.title': 'Hourly activity',
+        'hourly.window': 'Last 14 days',
+        'hourly.low': 'Low',
+        'hourly.high': 'High',
+        'hourly.hourTick': '{{hour}}h',
+        'bucket.night': 'Night',
+        'bucket.morning': 'Morning',
+        'bucket.afternoon': 'Afternoon',
+        'bucket.evening': 'Evening',
+        'modelHour.title': '0–24h by model',
+        'dailyModel.title': 'Daily model mix',
+        'dailyModel.other': 'Other',
+        'sizes.title': 'Request size distribution',
+        'sizes.model': 'Model',
+        'sizes.count': 'Calls',
+        'sizes.p50': '50%',
+        'sizes.p90': '90%',
+        'sizes.total': 'Top {{models}} models · {{count}} calls',
+        'sizes.note': 'Per-model distribution (each row normalized); line = 50%, dot = 90%',
+        'sizes.empty': 'No request samples yet',
       },
     };
 
@@ -514,6 +617,67 @@ window.__ModuleLoader__.load({
 .dst-model-fill{position:absolute;inset:0 auto 0 0;border-radius:4px;background:var(--dsw-alias-accent-primary,#2f7cf6);min-width:2px}
 .dst-model-total{text-align:right;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary,#333);font-weight:600}
 .dst-model-sub{grid-column:1/-1;font-size:11px;color:var(--dsw-alias-label-tertiary,#999);margin-top:-6px}
+.dst-activity-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;min-width:0}
+.dst-activity-tools .dst-seg{margin-left:0}
+.dst-activity-search{width:150px;height:24px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:var(--dsw-radius-sm,6px);background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary,#333);font:inherit;font-size:12px}
+.dst-activity-search::placeholder{color:var(--dsw-alias-label-tertiary,#999)}
+.dst-activity-search:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,#2f7cf6);outline-offset:1px}
+.dst-activity-list{display:flex;flex-direction:column;gap:2px;max-height:380px;overflow-y:auto;min-width:0;padding-right:4px}
+.dst-activity-row{display:grid;grid-template-columns:minmax(110px,1.5fr) minmax(70px,100px) minmax(96px,130px) minmax(160px,2.2fr);gap:12px;align-items:center;padding:5px 8px;border-radius:var(--dsw-radius-sm,6px);min-width:0}
+.dst-activity-row:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04))}
+.dst-activity-name{display:flex;flex-direction:column;gap:1px;min-width:0}
+.dst-activity-value{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--dsw-alias-label-primary,#333);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dst-activity-meta{text-align:right;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary,#999);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dst-activity-spark{display:flex;align-items:stretch;gap:2px;height:14px;min-width:0}
+.dst-activity-spark.is-2x{height:26px}
+.dst-spark-cell{flex:1 1 0;min-width:1px;border-radius:2px;background:var(--dsw-alias-accent-primary,#2f7cf6);opacity:.08}
+.dst-activity-empty{padding:18px 8px;text-align:center;color:var(--dsw-alias-label-tertiary,#999);font-size:12px}
+.dst-activity-empty-title{color:var(--dsw-alias-label-secondary,#666);margin-bottom:4px}
+.dst-legend{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--dsw-alias-label-tertiary,#999);font-size:11px;min-width:0}
+.dst-legend-label{white-space:nowrap}
+.dst-legend-swatch{width:12px;height:8px;border-radius:2px;background:var(--dsw-alias-accent-primary,#2f7cf6);display:inline-block}
+.dst-legend-item{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;max-width:220px;overflow:hidden}
+.dst-legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.dst-legend-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dst-legend-value{color:var(--dsw-alias-label-secondary,#666);font-variant-numeric:tabular-nums}
+.dst-note{color:var(--dsw-alias-label-tertiary,#999);font-size:11px}
+.dst-buckets{display:flex;gap:10px;flex-wrap:wrap}
+.dst-bucket{flex:1 1 150px;display:flex;align-items:baseline;gap:10px;padding:2px 4px;min-width:0}
+.dst-bucket-label{font-size:11px;color:var(--dsw-alias-label-tertiary,#999);white-space:nowrap}
+.dst-bucket-share{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary,#333);font-variant-numeric:tabular-nums;margin-left:auto}
+.dst-hourgrid{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-x:auto}
+.dst-hourgrid-row{display:grid;grid-template-columns:44px repeat(24,minmax(12px,1fr));gap:2px;align-items:center;min-width:520px}
+.dst-hourgrid-head{color:var(--dsw-alias-label-tertiary,#999);font-size:10px}
+.dst-hourgrid-hour{text-align:center}
+.dst-hourgrid-day{font-size:11px;color:var(--dsw-alias-label-tertiary,#999);font-variant-numeric:tabular-nums}
+.dst-hourgrid-cell{height:14px;border-radius:2px;background:var(--dsw-alias-accent-primary,#2f7cf6);opacity:.07;min-width:8px}
+.dst-area-chart{width:100%;height:auto;display:block;overflow:visible}
+.dst-chart-axis{stroke:var(--dsw-alias-border-l2,rgba(0,0,0,.12));stroke-width:1}
+.dst-chart-axis-text{fill:var(--dsw-alias-label-tertiary,#999);font-size:10px;font-variant-numeric:tabular-nums}
+.dst-dailymix{display:flex;flex-direction:column;gap:4px;min-width:0}
+.dst-dailymix-bars{display:flex;align-items:flex-end;gap:3px;height:150px;padding:0 2px}
+.dst-dailymix-col{flex:1 1 0;min-width:2px;height:100%;display:flex;align-items:flex-end}
+.dst-dailymix-stack{width:100%;display:flex;flex-direction:column-reverse;border-radius:2px 2px 0 0;overflow:hidden}
+.dst-dailymix-seg{display:block;width:100%;min-height:1px}
+.dst-dailymix-axis{display:flex;color:var(--dsw-alias-label-tertiary,#999);font-size:10px}
+.dst-dailymix-tick{flex:1 1 0;min-width:0;text-align:center;white-space:nowrap;overflow:hidden}
+.dst-sizes{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dst-size-row{display:grid;grid-template-columns:minmax(120px,1.2fr) 70px 76px 76px minmax(180px,2fr);gap:10px;align-items:center;padding:4px 8px;border-radius:var(--dsw-radius-sm,6px);min-width:0}
+.dst-size-row:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04))}
+.dst-size-row-head{color:var(--dsw-alias-label-tertiary,#999);font-size:11px;padding-bottom:2px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.06));border-radius:0}
+.dst-size-model{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary,#333);font-size:12px}
+.dst-size-count,.dst-size-p{text-align:right;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#666);font-size:11px;white-space:nowrap}
+.dst-size-chart{color:var(--dsw-alias-accent-primary,#2f7cf6);min-width:0}
+.dst-size-chart svg{width:100%;height:38px;display:block}
+.dst-size-area{fill:currentColor;opacity:.3}
+.dst-size-line{stroke:currentColor;stroke-width:.8;opacity:.55}
+.dst-size-dot{fill:currentColor}
+.dst-sizes-axis{display:flex;justify-content:space-between;padding:0 8px;color:var(--dsw-alias-label-tertiary,#999);font-size:10px;font-variant-numeric:tabular-nums}
+.dst-insights{min-height:240px}
+.dst-insights .dst-seg{margin-left:0;flex-wrap:wrap}
+.dst-insights .dst-seg button{white-space:nowrap}
+.dst-chart-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}
+.dst-chart-toolbar.dst-end{justify-content:flex-end}
 .dst-crumbs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;font-size:12px;color:var(--dsw-alias-label-tertiary,#999)}
 .dst-crumbs-back{display:inline-flex}
 .dst-crumb-link{padding:2px 8px;border:none;border-radius:var(--dsw-radius-sm,4px);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:12px;cursor:pointer;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .12s,color .12s}
@@ -998,6 +1162,464 @@ button.dst-row:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(-
             cacheWrite: formatExact(row.cacheWrite),
             settlements: formatExact(row.settlements),
           })))));
+    }
+
+    // ---- workspace activity distribution -------------------------------------
+    // The Host serves the ranked workspaces/sessions with a zero-filled daily
+    // token series; this section renders the ranking, the share and the strip.
+    const ACTIVITY_REFRESH_MS = 60000;
+
+    /** Fetch the activity distribution; throws on non-2xx. */
+    function fetchActivity() {
+      return fetch(ACTIVITY_ROUTE, { credentials: 'same-origin', headers: { accept: 'application/json' } }).then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      });
+    }
+
+    /** Shared load-into-state effect for the activity route. */
+    function useActivity(refreshMs) {
+      const [state, setState] = React.useState({ loading: true, data: null, error: null });
+      const load = React.useCallback(() => {
+        let cancelled = false;
+        setState((previous) => ({ ...previous, loading: true }));
+        Promise.resolve()
+          .then(fetchActivity)
+          .then((json) => {
+            if (!cancelled) setState({ loading: false, data: json, error: null });
+          })
+          .catch((error) => {
+            if (!cancelled) {
+              setState((previous) => ({
+                loading: false,
+                data: previous.data,
+                error: String(error && error.message ? error.message : error),
+              }));
+            }
+          });
+        return () => {
+          cancelled = true;
+        };
+      }, []);
+      React.useEffect(() => {
+        const cleanup = load();
+        const timer = setInterval(load, refreshMs);
+        return () => {
+          cleanup();
+          clearInterval(timer);
+        };
+      }, [load, refreshMs]);
+      return [state, load];
+    }
+
+    /**
+     * Workspace / session activity ranking with a per-day token strip.
+     * `按工作空间` ranks projects (sessions metric = session count); `按会话`
+     * ranks sessions (sessions metric = billed requests, since one session is
+     * one row). The strip always encodes daily tokens, so a quiet row means the
+     * identity is old rather than idle.
+     */
+    function WorkspaceActivity({ t, lang }) {
+      const [state, reload] = useActivity(ACTIVITY_REFRESH_MS);
+      const [mode, setMode] = React.useState('workspace');
+      const [metric, setMetric] = React.useState('token');
+      const [query, setQuery] = React.useState('');
+      const [zoom, setZoom] = React.useState(false);
+      const data = state.data;
+      const isWorkspace = mode === 'workspace';
+      const effectiveMetric = metric === 'sessions' && !isWorkspace ? 'requests' : metric;
+      const metricKey = effectiveMetric === 'token' ? 'total' : (isWorkspace ? 'sessions' : 'requests');
+      const rawRows = data ? (isWorkspace ? data.workspaces : data.sessions) || [] : [];
+      const denominator = (() => {
+        if (!data) return 0;
+        if (isWorkspace) return effectiveMetric === 'token' ? data.workspaceTotal : data.workspaceSessions;
+        return effectiveMetric === 'token' ? data.sessionTotal : data.sessionRequests;
+      })();
+      const needle = query.trim().toLowerCase();
+      const rows = rawRows
+        .filter((row) => needle.length === 0
+          || String(row.title || '').toLowerCase().includes(needle)
+          || String(row.projectTitle || '').toLowerCase().includes(needle))
+        .slice()
+        .sort((a, b) => (b[metricKey] || 0) - (a[metricKey] || 0));
+      const maxDay = rows.reduce((max, row) => {
+        for (const value of row.series || []) if (value > max) max = value;
+        return max;
+      }, 0);
+      const days = data && Array.isArray(data.days) ? data.days : [];
+      // Two workspaces can share a final path segment (same folder name in two
+      // parents or drives); qualify only those, with the shortest unique path
+      // suffix, so the common case keeps its short name.
+      const segmentsOf = (id) => String(id).split(/[\\/]+/).filter((part) => part.length > 0);
+      const duplicateGroups = new Map();
+      if (isWorkspace) {
+        for (const row of rawRows) {
+          const key = row.title || '';
+          const group = duplicateGroups.get(key);
+          if (group === undefined) duplicateGroups.set(key, [row]);
+          else group.push(row);
+        }
+      }
+      const nameOf = (row) => {
+        const base = row.title || (isWorkspace ? t('breakdown.untitled') : t('breakdown.untitledSession'));
+        const group = isWorkspace ? duplicateGroups.get(row.title || '') : undefined;
+        if (group === undefined || group.length < 2) return base;
+        const parts = segmentsOf(row.id);
+        const others = group.filter((other) => other.id !== row.id).map((other) => segmentsOf(other.id));
+        for (let length = 2; length <= parts.length; length += 1) {
+          const suffix = parts.slice(-length).join('/');
+          if (others.every((other) => other.slice(-length).join('/') !== suffix)) return suffix;
+        }
+        return parts.join('/');
+      };
+      const metaOf = (row) => {
+        const share = denominator > 0 ? `${(((row[metricKey] || 0) / denominator) * 100).toFixed(1)}%` : '—';
+        const count = isWorkspace
+          ? interpolate(t('activity.sessions'), { count: formatExact(row.sessions) })
+          : interpolate(t('activity.requests'), { count: formatExact(row.requests) });
+        return `${share} · ${count}`;
+      };
+      const spark = (row) => h('span', { className: `dst-activity-spark${zoom ? ' is-2x' : ''}`, 'aria-hidden': true },
+        days.map((day, index) => {
+          const value = Array.isArray(row.series) && row.series[index] ? row.series[index] : 0;
+          const level = value > 0 && maxDay > 0 ? Math.max(0.2, Math.min(1, Math.sqrt(value / maxDay))) : 0;
+          return h('span', {
+            key: day,
+            className: 'dst-spark-cell',
+            style: level === 0 ? undefined : { opacity: level },
+            title: `${day} · ${formatCount(value, lang)}`,
+          });
+        }));
+
+      let body;
+      if (!data && state.loading) {
+        body = h('div', { className: 'dst-activity-empty' }, t('activity.loading'));
+      } else if (!data && state.error) {
+        body = h('div', { className: 'dst-activity-empty' },
+          h('div', { className: 'dst-activity-empty-title' }, t('activity.error')),
+          h('div', null, state.error),
+          h('button', { type: 'button', className: 'dst-btn', style: { marginTop: '8px' }, onClick: reload }, t('activity.retry')));
+      } else if (rows.length === 0) {
+        const noMatch = needle.length > 0;
+        body = h('div', { className: 'dst-activity-empty' },
+          h('div', { className: 'dst-activity-empty-title' }, noMatch ? t('activity.noMatch') : t('activity.empty')),
+          h('div', null, noMatch ? t('activity.noMatchHint') : t('activity.emptyHint')));
+      } else {
+        body = h('div', { className: 'dst-activity-list' },
+          rows.map((row) => h('div', {
+            key: `${isWorkspace ? 'w' : 's'}:${row.id}`,
+            className: 'dst-activity-row',
+            title: row.id,
+          },
+            h('div', { className: 'dst-activity-name' },
+              h('span', { className: 'dst-row-title' }, nameOf(row)),
+              !isWorkspace ? h('span', { className: 'dst-row-sub' }, row.projectTitle || row.project || '') : null),
+            h('span', { className: 'dst-activity-value' },
+              effectiveMetric === 'token' ? formatCount(row.total, lang) : formatExact(row[metricKey])),
+            h('span', { className: 'dst-activity-meta' }, metaOf(row)),
+            spark(row))));
+      }
+
+      return h('div', { className: 'dst-section' },
+        h('div', { className: 'dst-section-head' },
+          h('div', { className: 'dst-section-title' }, t('activity.title')),
+          h('span', { className: 'dst-badge' }, t('activity.window')),
+          h('div', { className: 'dst-activity-tools' },
+            h(Segmented, {
+              label: t('activity.title'),
+              active: mode,
+              onSelect: (next) => setMode(next),
+              options: [
+                { id: 'session', label: t('activity.bySession') },
+                { id: 'workspace', label: t('activity.byWorkspace') },
+              ],
+            }),
+            h('input', {
+              className: 'dst-activity-search',
+              type: 'search',
+              value: query,
+              placeholder: t('activity.search'),
+              'aria-label': t('activity.search'),
+              onChange: (event) => setQuery(event.target.value),
+            }),
+            h(Segmented, {
+              label: t('activity.metricToken'),
+              active: effectiveMetric,
+              onSelect: (next) => setMetric(next),
+              options: [
+                { id: 'token', label: t('activity.metricToken') },
+                isWorkspace
+                  ? { id: 'sessions', label: t('activity.metricSessions') }
+                  : { id: 'requests', label: t('activity.metricRequests') },
+              ],
+            }),
+            h('button', {
+              type: 'button',
+              className: 'dst-btn',
+              'aria-pressed': zoom,
+              title: t('activity.zoomHint'),
+              onClick: () => setZoom((value) => !value),
+            }, t('activity.zoom')),
+            h('button', { type: 'button', className: 'dst-btn', onClick: reload, disabled: state.loading }, t('action.refresh')))),
+        body,
+        data && rows.length > 0
+          ? h('div', { className: 'dst-breakdown-foot' },
+              h('span', null, interpolate(t('activity.footer'), {
+                total: formatCount(denominator, lang),
+                days: days.length,
+              })),
+              !isWorkspace && data.truncatedSessions ? h('span', { className: 'dst-breakdown-note' },
+                interpolate(t('activity.truncated'), { count: formatExact(data.sessions.length) })) : null,
+              state.error ? h('span', { className: 'dst-error' }, state.error) : null)
+          : null);
+    }
+
+    // ---- hourly / model / request-size charts --------------------------------
+    const INSIGHTS_REFRESH_MS = 60000;
+    const CHART_COLORS = ['#2f7cf6', '#f0a23a', '#3fae7a', '#d477b0', '#8c7ae6', '#e0603f', '#8a9a5b', '#6b7a8f', '#b9c2cf'];
+
+    /** Fetch the hourly / model / size analytics; throws on non-2xx. */
+    function fetchInsights() {
+      return fetch(INSIGHTS_ROUTE, { credentials: 'same-origin', headers: { accept: 'application/json' } }).then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      });
+    }
+
+    /** Shared load-into-state effect for the insights route. */
+    function useInsights(refreshMs) {
+      const [state, setState] = React.useState({ loading: true, data: null, error: null });
+      const load = React.useCallback(() => {
+        let cancelled = false;
+        setState((previous) => ({ ...previous, loading: true }));
+        Promise.resolve()
+          .then(fetchInsights)
+          .then((json) => {
+            if (!cancelled) setState({ loading: false, data: json, error: null });
+          })
+          .catch((error) => {
+            if (!cancelled) {
+              setState((previous) => ({
+                loading: false,
+                data: previous.data,
+                error: String(error && error.message ? error.message : error),
+              }));
+            }
+          });
+        return () => {
+          cancelled = true;
+        };
+      }, []);
+      React.useEffect(() => {
+        const cleanup = load();
+        const timer = setInterval(load, refreshMs);
+        return () => {
+          cleanup();
+          clearInterval(timer);
+        };
+      }, [load, refreshMs]);
+      return [state, load];
+    }
+
+    /** "低 ■■■■■ 高" swatch legend for the hour grid. */
+    function ShadeLegend({ t }) {
+      return h('span', { className: 'dst-legend', 'aria-hidden': true },
+        h('span', { className: 'dst-legend-label' }, t('hourly.low')),
+        [0.15, 0.35, 0.55, 0.75, 1].map((level) => h('span', { key: level, className: 'dst-legend-swatch', style: { opacity: level } })),
+        h('span', { className: 'dst-legend-label' }, t('hourly.high')));
+    }
+
+    /** Day x hour token grid plus the four time-of-day shares (tab body). */
+    function HourlyHeatmapBody({ t, lang, hourly }) {
+      const rows = (hourly.byDay || []).slice().reverse();
+      const max = rows.reduce((peak, row) => {
+        for (const value of row.hours) if (value > peak) peak = value;
+        return peak;
+      }, 0);
+      const buckets = hourly.buckets || [];
+      const toolbar = h('div', { className: 'dst-chart-toolbar dst-end' },
+        h('span', { className: 'dst-badge' }, t('hourly.window')),
+        h(ShadeLegend, { t }));
+      const bucketRow = h('div', { className: 'dst-buckets' },
+        buckets.map((bucket) => h('div', { key: bucket.id, className: 'dst-bucket' },
+          h('span', { className: 'dst-bucket-label' }, `${t('bucket.' + bucket.id)} ${bucket.from}-${bucket.to}`),
+          h('span', { className: 'dst-bucket-share' }, `${(bucket.share * 100).toFixed(1)}%`))));
+      const grid = h('div', { className: 'dst-hourgrid' },
+        h('div', { className: 'dst-hourgrid-row dst-hourgrid-head' },
+          h('span', { className: 'dst-hourgrid-day' }),
+          Array.from({ length: 24 }, (_, hour) => h('span', { key: hour, className: 'dst-hourgrid-hour' }, hour))),
+        rows.map((row) => h('div', { key: row.day, className: 'dst-hourgrid-row' },
+          h('span', { className: 'dst-hourgrid-day' }, row.day.slice(5)),
+          row.hours.map((value, hour) => h('span', {
+            key: hour,
+            className: 'dst-hourgrid-cell',
+            title: `${row.day} ${pad2(hour)}:00 · ${formatCount(value, lang)}`,
+            style: value > 0 && max > 0 ? { opacity: Math.max(0.18, Math.min(1, Math.sqrt(value / max))) } : undefined,
+          })))));
+      return h(React.Fragment, null, toolbar, bucketRow, grid);
+    }
+
+    /** One translucent area per model over the 24-hour axis (tab body). */
+    function ModelHourlyBody({ t, lang, hourly, colorOf }) {
+      const models = hourly.byModel || [];
+      const peak = models.reduce((max, row) => Math.max(max, ...row.hours), 0) || 1;
+      const width = 760;
+      const height = 180;
+      const left = 46;
+      const bottom = 22;
+      const top = 10;
+      const x = (hour) => left + (hour / 23) * (width - left - 8);
+      const y = (value) => top + (1 - value / peak) * (height - top - bottom);
+      const areaOf = (hours) => {
+        const points = hours.map((value, hour) => `${x(hour).toFixed(1)},${y(value).toFixed(1)}`);
+        return `M${points.join(' L')} L${x(23).toFixed(1)},${height - bottom} L${x(0).toFixed(1)},${height - bottom} Z`;
+      };
+      const ticks = [0, 4, 8, 12, 16, 20];
+      const toolbar = h('div', { className: 'dst-chart-toolbar' },
+        h('span', { className: 'dst-legend' },
+          models.map((row) => h('span', { key: row.model, className: 'dst-legend-item' },
+            h('span', { className: 'dst-legend-dot', style: { background: colorOf(row.model) } }),
+            h('span', { className: 'dst-legend-text' }, row.model)))));
+      const chart = h('svg', { className: 'dst-area-chart', viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': t('modelHour.title') },
+        h('line', { x1: left, y1: height - bottom, x2: width - 8, y2: height - bottom, className: 'dst-chart-axis' }),
+        models.map((row) => h('path', {
+          key: row.model,
+          d: areaOf(row.hours),
+          fill: colorOf(row.model),
+          opacity: 0.18,
+          stroke: colorOf(row.model),
+          strokeWidth: 1,
+        })),
+        h('text', { x: left - 6, y: top + 8, className: 'dst-chart-axis-text', textAnchor: 'end' }, formatCount(peak, lang)),
+        ticks.map((hour) => h('text', {
+          key: hour,
+          x: x(hour),
+          y: height - 6,
+          className: 'dst-chart-axis-text',
+          textAnchor: 'middle',
+        }, t('hourly.hourTick', { hour }))));
+      return h(React.Fragment, null, toolbar, chart);
+    }
+
+    /** Stacked bars: one column per day, segments per model (tab body). */
+    function DailyModelBarsBody({ t, lang, daily, colorOf }) {
+      const days = daily.days || [];
+      const legend = daily.models || [];
+      const totals = days.map((row) => legend.reduce((sum, entry) => sum + (row.models[entry.id] || 0), 0));
+      const peak = totals.reduce((max, value) => Math.max(max, value), 0) || 1;
+      const toolbar = h('div', { className: 'dst-chart-toolbar' },
+        h('span', { className: 'dst-legend' },
+          legend.map((entry) => h('span', { key: entry.id, className: 'dst-legend-item' },
+            h('span', { className: 'dst-legend-dot', style: { background: colorOf(entry.id) } }),
+            h('span', { className: 'dst-legend-text' },
+              entry.id === 'other' ? t('dailyModel.other') : entry.id),
+            h('span', { className: 'dst-legend-value' }, formatCount(entry.total, lang))))));
+      const bars = h('div', { className: 'dst-dailymix' },
+        h('div', { className: 'dst-dailymix-bars' },
+          days.map((row, index) => h('div', {
+            key: row.day,
+            className: 'dst-dailymix-col',
+            title: `${row.day} · ${formatCount(totals[index], lang)}`,
+          }, h('div', { className: 'dst-dailymix-stack', style: { height: `${(totals[index] / peak) * 100}%` } },
+            legend.map((entry) => {
+              const value = row.models[entry.id] || 0;
+              return value > 0
+                ? h('span', { key: entry.id, className: 'dst-dailymix-seg', style: { flexGrow: value, background: colorOf(entry.id) } })
+                : null;
+            }))))),
+        h('div', { className: 'dst-dailymix-axis' },
+          days.map((row, index) => h('span', { key: row.day, className: 'dst-dailymix-tick' },
+            (days.length - 1 - index) % 5 === 0 ? row.day.slice(5) : ''))));
+      return h(React.Fragment, null, toolbar, bars);
+    }
+
+    /** Per-model request size distribution with 50% line and 90% dot (tab body). */
+    function RequestSizesBody({ t, lang, sizes }) {
+      const models = sizes.models || [];
+      const axisMax = sizes.axisMax || 1;
+      const width = 260;
+      const height = 34;
+      const pos = (value) => Math.min(width - 1, (value / axisMax) * width);
+      // Each row normalizes to its own peak, matching the reference footnote:
+      // the shape is readable even for models with far fewer requests.
+      const areaOf = (buckets) => {
+        const peak = buckets.reduce((max, value) => Math.max(max, value), 0) || 1;
+        const step = width / buckets.length;
+        const points = buckets.map((count, index) => `${(index * step + step / 2).toFixed(1)},${(height - 2 - (count / peak) * (height - 6)).toFixed(1)}`);
+        return `M0,${height - 2} L${points.join(' L')} L${width},${height - 2} Z`;
+      };
+      const toolbar = h('div', { className: 'dst-chart-toolbar dst-end' },
+        h('span', { className: 'dst-note' }, interpolate(t('sizes.total'), {
+          models: formatExact(models.length),
+          count: formatExact(sizes.total),
+        })));
+      const table = models.length === 0
+        ? h('div', { className: 'dst-activity-empty' }, t('sizes.empty'))
+        : h('div', { className: 'dst-sizes' },
+            h('div', { className: 'dst-size-row dst-size-row-head' },
+              h('span', { className: 'dst-size-model' }, t('sizes.model')),
+              h('span', { className: 'dst-size-count' }, t('sizes.count')),
+              h('span', { className: 'dst-size-p' }, t('sizes.p50')),
+              h('span', { className: 'dst-size-p' }, t('sizes.p90')),
+              h('span', { className: 'dst-size-chart' })),
+            models.map((row) => h('div', { key: row.model, className: 'dst-size-row' },
+              h('span', { className: 'dst-size-model', title: row.model }, row.model),
+              h('span', { className: 'dst-size-count' }, formatExact(row.count)),
+              h('span', { className: 'dst-size-p' }, formatCount(row.p50, lang)),
+              h('span', { className: 'dst-size-p' }, formatCount(row.p90, lang)),
+              h('span', { className: 'dst-size-chart' },
+                h('svg', { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none', 'aria-hidden': true },
+                  h('path', { d: areaOf(row.buckets), className: 'dst-size-area' }),
+                  h('line', { x1: pos(row.p50), x2: pos(row.p50), y1: 2, y2: height - 2, className: 'dst-size-line' }),
+                  h('circle', { cx: pos(row.p90), cy: 3, r: 2, className: 'dst-size-dot' }))))),
+            h('div', { className: 'dst-sizes-axis' },
+              [0, 0.25, 0.5, 0.75, 1].map((fraction) => h('span', { key: fraction }, formatCount(axisMax * fraction, lang)))),
+            h('div', { className: 'dst-note' }, t('sizes.note')));
+      return h(React.Fragment, null, toolbar, table);
+    }
+
+    /** The four analytics charts share one fetch and one tabbed card. */
+    function Insights({ t, lang }) {
+      const [state, reload] = useInsights(INSIGHTS_REFRESH_MS);
+      const [tab, setTab] = React.useState('hourly');
+      const data = state.data;
+      const tabs = [
+        { id: 'hourly', label: t('insights.tab.hourly') },
+        { id: 'modelHour', label: t('insights.tab.modelHour') },
+        { id: 'dailyModel', label: t('insights.tab.dailyModel') },
+        { id: 'sizes', label: t('insights.tab.sizes') },
+      ];
+      const head = h('div', { className: 'dst-section-head' },
+        h('div', { className: 'dst-section-title' }, t('insights.title')),
+        h('span', { className: 'dst-spacer' }),
+        h(Segmented, { label: t('insights.title'), active: tab, onSelect: setTab, options: tabs }));
+      if (!data) {
+        return h('div', { className: 'dst-section dst-insights' },
+          head,
+          state.error
+            ? h('div', { className: 'dst-activity-empty' },
+                h('div', { className: 'dst-activity-empty-title' }, t('insights.error')),
+                h('div', null, state.error),
+                h('button', { type: 'button', className: 'dst-btn', style: { marginTop: '8px' }, onClick: reload }, t('insights.retry')))
+            : h('div', { className: 'dst-activity-empty' }, t('insights.loading')));
+      }
+      const colorMap = new Map();
+      for (const entry of data.daily.models || []) colorMap.set(entry.id, CHART_COLORS[colorMap.size % CHART_COLORS.length]);
+      for (const entry of data.hourly.byModel || []) {
+        if (!colorMap.has(entry.model)) colorMap.set(entry.model, CHART_COLORS[colorMap.size % CHART_COLORS.length]);
+      }
+      const colorOf = (id) => colorMap.get(id) || CHART_COLORS[CHART_COLORS.length - 1];
+      const body = tab === 'modelHour'
+        ? h(ModelHourlyBody, { t, lang, hourly: data.hourly, colorOf })
+        : tab === 'dailyModel'
+          ? h(DailyModelBarsBody, { t, lang, daily: data.daily, colorOf })
+          : tab === 'sizes'
+            ? h(RequestSizesBody, { t, lang, sizes: data.sizes })
+            : h(HourlyHeatmapBody, { t, lang, hourly: data.hourly });
+      return h('div', { className: 'dst-section dst-insights' },
+        head,
+        body,
+        state.error ? h('div', { className: 'dst-note dst-error' }, state.error) : null);
     }
 
     // ---- project / session / turn breakdown ---------------------------------
@@ -1515,6 +2137,8 @@ button.dst-row:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(-
               h('div', { className: 'dst-section-head' },
                 h('div', { className: 'dst-section-title' }, t('models.title'))),
               h(ModelUsage, { t, lang, models: data.models })),
+            hasBreakdown(data) ? h(WorkspaceActivity, { t, lang }) : null,
+            hasBreakdown(data) ? h(Insights, { t, lang }) : null,
             hasBreakdown(data) ? h(BreakdownSection, { t, lang, data }) : null,
             h('div', { className: 'dst-foot' }, interpolate(t('footer.hint'), { tz: data.timeZone || 'local' })))
           : null));
